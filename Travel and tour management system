@@ -1,0 +1,547 @@
+
+import tkinter as tk
+from tkinter import ttk, messagebox
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+
+# ---------------- DATA FILES ----------------
+
+CUSTOMER_FILE = "customers.csv"
+BOOKING_FILE = "bookings.csv"
+
+packages = {
+    "Goa Tour": 8000,
+    "Manali Tour": 12000,
+    "Mumbai Tour": 5000,
+    "Kashmir Tour": 18000,
+    "Jaipur Tour": 9000,
+    "Kerala Tour": 15000
+}
+
+if os.path.exists(CUSTOMER_FILE):
+    customers = pd.read_csv(CUSTOMER_FILE)
+else:
+    customers = pd.DataFrame(
+        columns=["Name", "Phone", "Email"]
+    )
+
+if os.path.exists(BOOKING_FILE):
+    bookings = pd.read_csv(BOOKING_FILE)
+else:
+    bookings = pd.DataFrame(
+        columns=["Booking ID", "Customer", "Package",
+                 "Persons", "Price", "Total", "Status"]
+    )
+
+# ---------------- FUNCTIONS ----------------
+
+def save_data():
+    customers.to_csv(CUSTOMER_FILE, index=False)
+    bookings.to_csv(BOOKING_FILE, index=False)
+
+
+def add_customer():
+    global customers
+
+    name = name_entry.get().strip()
+    phone = phone_entry.get().strip()
+    email = email_entry.get().strip()
+
+    if not name or not phone or not email:
+        messagebox.showwarning("Warning", "Fill all customer details")
+        return
+
+    if phone in customers["Phone"].astype(str).values:
+        messagebox.showerror("Error", "Phone number already exists")
+        return
+
+    customers.loc[len(customers)] = [name, phone, email]
+
+    save_data()
+    display_customers()
+
+    name_entry.delete(0, tk.END)
+    phone_entry.delete(0, tk.END)
+    email_entry.delete(0, tk.END)
+
+    messagebox.showinfo("Success", "Customer added successfully")
+
+
+def display_customers():
+    for item in customer_table.get_children():
+        customer_table.delete(item)
+
+    for _, row in customers.iterrows():
+        customer_table.insert("", tk.END, values=list(row))
+
+
+def update_price(event=None):
+    package = package_combo.get()
+    price_label.config(
+        text=f"Price per person: ₹{packages.get(package, 0):,}"
+    )
+
+
+def book_package():
+    global bookings
+
+    customer = booking_customer.get().strip()
+    package = package_combo.get()
+    persons = persons_entry.get().strip()
+
+    if not customer or not package or not persons:
+        messagebox.showwarning("Warning", "Fill all booking details")
+        return
+
+    if customer not in customers["Name"].astype(str).values:
+        messagebox.showerror(
+            "Error", "Please add the customer first"
+        )
+        return
+
+    try:
+        persons = int(persons)
+        if persons <= 0:
+            raise ValueError
+    except ValueError:
+        messagebox.showerror(
+            "Error", "Enter a valid number of persons"
+        )
+        return
+
+    price = packages[package]
+    total = price * persons
+
+    booking_id = (
+        int(pd.to_numeric(
+            bookings["Booking ID"], errors="coerce"
+        ).max()) + 1
+        if len(bookings) and
+        pd.to_numeric(
+            bookings["Booking ID"], errors="coerce"
+        ).notna().any()
+        else 1001
+    )
+
+    bookings.loc[len(bookings)] = [
+        booking_id, customer, package,
+        persons, price, total, "Confirmed"
+    ]
+
+    save_data()
+    display_bookings()
+
+    booking_customer.set("")
+    package_combo.set("")
+    persons_entry.delete(0, tk.END)
+    price_label.config(text="Price per person: ₹0")
+
+    messagebox.showinfo(
+        "Booking Successful",
+        f"Booking ID: {booking_id}\n"
+        f"Customer: {customer}\n"
+        f"Package: {package}\n"
+        f"Total Amount: ₹{total:,}"
+    )
+
+
+def display_bookings(data=None):
+    for item in booking_table.get_children():
+        booking_table.delete(item)
+
+    records = bookings if data is None else data
+
+    for _, row in records.iterrows():
+        booking_table.insert("", tk.END, values=list(row))
+
+
+def search_booking():
+    query = search_entry.get().strip().lower()
+
+    if not query:
+        display_bookings()
+        return
+
+    result = bookings[
+        bookings["Customer"].astype(str).str.lower().str.contains(
+            query, na=False
+        )
+        |
+        bookings["Package"].astype(str).str.lower().str.contains(
+            query, na=False
+        )
+        |
+        bookings["Booking ID"].astype(str).str.contains(
+            query, na=False
+        )
+    ]
+
+    display_bookings(result)
+
+
+def cancel_booking():
+    global bookings
+
+    selected = booking_table.selection()
+
+    if not selected:
+        messagebox.showwarning(
+            "Warning", "Select a booking first"
+        )
+        return
+
+    booking_id = str(
+        booking_table.item(selected[0])["values"][0]
+    )
+
+    if not messagebox.askyesno(
+        "Confirm", "Cancel this booking?"
+    ):
+        return
+
+    mask = bookings["Booking ID"].astype(str) == booking_id
+    bookings.loc[mask, "Status"] = "Cancelled"
+
+    save_data()
+    display_bookings()
+
+    messagebox.showinfo("Success", "Booking cancelled")
+
+
+def show_statistics():
+    confirmed = bookings[
+        bookings["Status"] == "Confirmed"
+    ]
+
+    total_bookings = len(bookings)
+    active_bookings = len(confirmed)
+    cancelled = len(bookings) - active_bookings
+    revenue = pd.to_numeric(
+        confirmed["Total"], errors="coerce"
+    ).sum()
+
+    popular = (
+        confirmed["Package"].value_counts().idxmax()
+        if not confirmed.empty else "No bookings"
+    )
+
+    result = f"""
+    TRAVEL AGENCY STATISTICS
+
+    Total Customers: {len(customers)}
+
+    Total Bookings: {total_bookings}
+
+    Confirmed Bookings: {active_bookings}
+
+    Cancelled Bookings: {cancelled}
+
+    Total Revenue: ₹{revenue:,.2f}
+
+    Most Popular Package:
+    {popular}
+    """
+
+    messagebox.showinfo("Statistics", result)
+
+
+def show_chart():
+    confirmed = bookings[
+        bookings["Status"] == "Confirmed"
+    ]
+
+    if confirmed.empty:
+        messagebox.showwarning(
+            "Warning", "No confirmed bookings available"
+        )
+        return
+
+    counts = confirmed["Package"].value_counts()
+
+    plt.figure(figsize=(9, 5))
+    counts.plot(kind="bar")
+
+    plt.title("Tour Package Booking Analysis")
+    plt.xlabel("Tour Packages")
+    plt.ylabel("Number of Bookings")
+    plt.xticks(rotation=30, ha="right")
+    plt.tight_layout()
+    plt.show()
+
+
+def show_revenue_chart():
+    confirmed = bookings[
+        bookings["Status"] == "Confirmed"
+    ]
+
+    if confirmed.empty:
+        messagebox.showwarning(
+            "Warning", "No revenue data available"
+        )
+        return
+
+    revenue = confirmed.groupby("Package")["Total"].sum()
+
+    plt.figure(figsize=(9, 5))
+    revenue.plot(kind="pie", autopct="%1.1f%%")
+
+    plt.title("Revenue by Tour Package")
+    plt.ylabel("")
+    plt.tight_layout()
+    plt.show()
+
+
+# ---------------- MAIN WINDOW ----------------
+
+root = tk.Tk()
+root.title("Travel Agency Management System")
+root.geometry("1150x780")
+root.configure(bg="#edf2f7")
+
+title = tk.Label(
+    root,
+    text="TRAVEL AGENCY & TOUR PACKAGE MANAGEMENT",
+    font=("Arial", 21, "bold"),
+    bg="#153448",
+    fg="white",
+    pady=18
+)
+title.pack(fill=tk.X)
+
+# ---------------- CUSTOMER SECTION ----------------
+
+customer_frame = tk.LabelFrame(
+    root,
+    text="Customer Management",
+    font=("Arial", 12, "bold"),
+    bg="#edf2f7",
+    padx=10,
+    pady=10
+)
+customer_frame.pack(fill=tk.X, padx=15, pady=8)
+
+tk.Label(customer_frame, text="Name:", bg="#edf2f7").grid(
+    row=0, column=0, padx=5, pady=5
+)
+name_entry = tk.Entry(customer_frame, width=22)
+name_entry.grid(row=0, column=1, padx=5)
+
+tk.Label(customer_frame, text="Phone:", bg="#edf2f7").grid(
+    row=0, column=2, padx=5
+)
+phone_entry = tk.Entry(customer_frame, width=20)
+phone_entry.grid(row=0, column=3, padx=5)
+
+tk.Label(customer_frame, text="Email:", bg="#edf2f7").grid(
+    row=0, column=4, padx=5
+)
+email_entry = tk.Entry(customer_frame, width=25)
+email_entry.grid(row=0, column=5, padx=5)
+
+tk.Button(
+    customer_frame,
+    text="ADD CUSTOMER",
+    command=add_customer,
+    bg="#198754",
+    fg="white",
+    font=("Arial", 10, "bold")
+).grid(row=1, column=2, pady=10)
+
+# ---------------- CUSTOMER TABLE ----------------
+
+customer_table = ttk.Treeview(
+    root,
+    columns=("Name", "Phone", "Email"),
+    show="headings",
+    height=4
+)
+
+for col in ("Name", "Phone", "Email"):
+    customer_table.heading(col, text=col)
+    customer_table.column(col, width=300)
+
+customer_table.pack(fill=tk.X, padx=15, pady=5)
+
+# ---------------- BOOKING SECTION ----------------
+
+booking_frame = tk.LabelFrame(
+    root,
+    text="Tour Package Booking",
+    font=("Arial", 12, "bold"),
+    bg="#edf2f7",
+    padx=10,
+    pady=10
+)
+booking_frame.pack(fill=tk.X, padx=15, pady=8)
+
+tk.Label(booking_frame, text="Customer Name:",
+         bg="#edf2f7").grid(row=0, column=0, padx=5, pady=5)
+
+booking_customer = ttk.Combobox(
+    booking_frame,
+    values=[],
+    width=20
+)
+booking_customer.grid(row=0, column=1, padx=5)
+
+def refresh_customer_list():
+    booking_customer["values"] = customers["Name"].tolist()
+
+tk.Label(booking_frame, text="Tour Package:",
+         bg="#edf2f7").grid(row=0, column=2, padx=5)
+
+package_combo = ttk.Combobox(
+    booking_frame,
+    values=list(packages.keys()),
+    state="readonly",
+    width=20
+)
+package_combo.grid(row=0, column=3, padx=5)
+package_combo.bind("<<ComboboxSelected>>", update_price)
+
+tk.Label(booking_frame, text="Persons:",
+         bg="#edf2f7").grid(row=1, column=0, padx=5, pady=8)
+
+persons_entry = tk.Entry(booking_frame, width=22)
+persons_entry.grid(row=1, column=1, padx=5)
+
+price_label = tk.Label(
+    booking_frame,
+    text="Price per person: ₹0",
+    font=("Arial", 10, "bold"),
+    bg="#edf2f7"
+)
+price_label.grid(row=1, column=2, padx=5)
+
+tk.Button(
+    booking_frame,
+    text="BOOK PACKAGE",
+    command=book_package,
+    bg="#0d6efd",
+    fg="white",
+    font=("Arial", 10, "bold")
+).grid(row=1, column=3, padx=5)
+
+# ---------------- BOOKING TABLE ----------------
+
+tk.Label(
+    root,
+    text="Booking Records",
+    font=("Arial", 13, "bold"),
+    bg="#edf2f7"
+).pack(pady=5)
+
+columns = (
+    "Booking ID", "Customer", "Package",
+    "Persons", "Price", "Total", "Status"
+)
+
+booking_table = ttk.Treeview(
+    root,
+    columns=columns,
+    show="headings",
+    height=7
+)
+
+for col in columns:
+    booking_table.heading(col, text=col)
+    booking_table.column(col, width=140)
+
+booking_table.pack(fill=tk.BOTH, expand=True, padx=15, pady=5)
+
+# ---------------- SEARCH ----------------
+
+search_frame = tk.Frame(root, bg="#edf2f7")
+search_frame.pack(pady=8)
+
+tk.Label(
+    search_frame,
+    text="Search:",
+    bg="#edf2f7",
+    font=("Arial", 10, "bold")
+).pack(side=tk.LEFT, padx=5)
+
+search_entry = tk.Entry(search_frame, width=25)
+search_entry.pack(side=tk.LEFT, padx=5)
+
+tk.Button(
+    search_frame,
+    text="SEARCH",
+    command=search_booking,
+    bg="#0d6efd",
+    fg="white"
+).pack(side=tk.LEFT, padx=5)
+
+tk.Button(
+    search_frame,
+    text="SHOW ALL",
+    command=lambda: display_bookings(),
+    bg="#6c757d",
+    fg="white"
+).pack(side=tk.LEFT, padx=5)
+
+tk.Button(
+    search_frame,
+    text="CANCEL BOOKING",
+    command=cancel_booking,
+    bg="#dc3545",
+    fg="white"
+).pack(side=tk.LEFT, padx=5)
+
+# ---------------- ANALYSIS BUTTONS ----------------
+
+analysis_frame = tk.Frame(root, bg="#edf2f7")
+analysis_frame.pack(pady=12)
+
+tk.Button(
+    analysis_frame,
+    text="STATISTICS",
+    command=show_statistics,
+    bg="#198754",
+    fg="white",
+    font=("Arial", 10, "bold"),
+    width=18
+).grid(row=0, column=0, padx=8)
+
+tk.Button(
+    analysis_frame,
+    text="BOOKING CHART",
+    command=show_chart,
+    bg="#6f42c1",
+    fg="white",
+    font=("Arial", 10, "bold"),
+    width=18
+).grid(row=0, column=1, padx=8)
+
+tk.Button(
+    analysis_frame,
+    text="REVENUE CHART",
+    command=show_revenue_chart,
+    bg="#fd7e14",
+    fg="white",
+    font=("Arial", 10, "bold"),
+    width=18
+).grid(row=0, column=2, padx=8)
+
+# ---------------- START ----------------
+
+refresh_customer_list()
+
+# Keep the customer list updated after adding a customer
+old_add_customer = add_customer
+
+def add_customer_updated():
+    old_add_customer()
+    refresh_customer_list()
+
+# Replace the button callback
+for widget in customer_frame.winfo_children():
+    if isinstance(widget, tk.Button):
+        widget.config(command=add_customer_updated)
+
+display_customers()
+display_bookings()
+
+root.mainloop()
